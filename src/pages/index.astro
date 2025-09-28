@@ -130,8 +130,6 @@ if (supabase && !supInitError) {
     { supInitError && (
       <div class="text-danger" style="padding: 12px; background: rgba(255,0,0,0.08); border: 1px solid rgba(255,0,0,0.3); margin: 12px; border-radius: 8px;">
         系统暂时不可用：{supInitError.message}。请稍后重试或联系管理员。
-        <br />
-        <small><a href="/test" style="color: #06f;">查看系统状态</a></small>
       </div>
     ) }
     
@@ -139,9 +137,6 @@ if (supabase && !supInitError) {
       <header class="site-header">
         <div class="container flex">
           <h1 class="title">板卡管理</h1>
-          <div style="margin-left: auto;">
-            <a href="/test" style="color: #8be9fd; text-decoration: none; font-size: 0.9em;">系统状态</a>
-          </div>
         </div>
       </header>
 
