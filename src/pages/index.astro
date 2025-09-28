@@ -1,23 +1,29 @@
 ---
 import { getSupabase } from "../lib/supabase";
-import { cache } from "../lib/cache";
+import { safeQuery, getEnvironmentTimeout } from "../lib/error-boundary";
 import FilterBar from "../components/FilterBar";
 import PaginationIsland from "../components/PaginationIsland";
 import Footer from "../components/Footer";
 import "../styles/global.css";
+
 // 将首页标记为非预渲染（SSR），保证根据查询参数动态渲染
 export const prerender = false;
 
-// 在 Serverless 冷启动或环境变量缺失时，避免直接抛错导致 500
+// 安全的 Supabase 初始化
 let supabase: ReturnType<typeof getSupabase> | null = null;
 let supInitError: Error | null = null;
+
 try {
   supabase = getSupabase();
 } catch (e: any) {
+  console.error("Supabase 初始化失败:", e);
   supInitError = e;
 }
 
-// 读取筛选参数：公司（vendor_id）与类型（category），以及分页页码
+// 获取环境适配的超时时间
+const queryTimeout = getEnvironmentTimeout();
+
+// 读取筛选参数
 const vendorIdParam = Astro.url.searchParams.get('vendor_id');
 const categoryParam = Astro.url.searchParams.get('category');
 const pageParam = Astro.url.searchParams.get('page');
@@ -32,121 +38,83 @@ const fmtDate = (v: any) => {
   return d && !isNaN(d.getTime()) ? d.toLocaleString() : '-';
 };
 
-// 获取所有公司列表（使用缓存）
-let vendorList = cache.get<any[]>('vendors');
-if (!vendorList && supabase) {
-  try {
-    const { data, error } = await supabase.from("vendors").select("id, name").order("name");
-    if (error) {
-      console.error("获取供应商列表失败:", error);
-      vendorList = [];
-    } else {
-      vendorList = data || [];
-      cache.set('vendors', vendorList, 10 * 60 * 1000); // 缓存10分钟
-    }
-  } catch (e) {
-    console.error("获取供应商列表异常:", e);
-    vendorList = [];
-  }
-} else if (!vendorList) {
-  vendorList = [];
-}
-
-// 获取所有类别（使用缓存）
-let categories = cache.get<string[]>('categories');
-if (!categories && supabase) {
-  try {
-    const { data: categoryRows, error } = await supabase.from("boards").select("category");
-    if (error) {
-      console.error("获取类别列表失败:", error);
-      categories = [];
-    } else {
-      categories = categoryRows
-        ? [...new Set(categoryRows.map((item) => item.category))]
-            .filter(Boolean)
-            .sort()
-        : [];
-      cache.set('categories', categories, 10 * 60 * 1000); // 缓存10分钟
-    }
-  } catch (e) {
-    console.error("获取类别列表异常:", e);
-    categories = [];
-  }
-} else if (!categories) {
-  categories = [];
-}
-
-// 构建基础查询条件
-const baseFilter = {
-  ...(vendorId !== undefined ? { vendor_id: vendorId } : {}),
-  ...(category ? { category } : {})
-};
-
-// 执行查询，添加错误处理和超时控制
+// 初始化数据
+let vendorList: any[] = [];
+let categories: string[] = [];
 let boards: any[] = [];
 let totalCount = 0;
 let error: any = null;
 
-if (supabase) {
-  try {
-    // 使用 Promise.allSettled 代替 Promise.all 以避免一个查询失败导致整体失败
-    const [boardsResult, totalCountResult] = await Promise.allSettled([
-      // 获取当前页数据 - 简化查询，只获取必要字段
-      supabase
-        .from("boards")
-        .select(
-          `id, model, category, board_website, created_at, updated_at, vendor_id, vendors!inner ( id, name, website ), drivers ( id, os, duplex_mode, version, driver_url )`
-        )
-        .match(baseFilter)
-        .order("created_at", { ascending: false })
-        .range((page - 1) * pageSize, page * pageSize - 1),
-      
-      // 获取总数 - 使用更高效的计数查询
-      supabase
-        .from('boards')
-        .select('id', { count: 'exact', head: true })
-        .match(baseFilter)
-    ]);
+if (supabase && !supInitError) {
+  // 1. 获取供应商列表（使用安全查询）
+  const vendorResult = await safeQuery(
+    () => supabase.from("vendors").select("id, name").order("name"),
+    { timeout: queryTimeout, fallback: [] }
+  );
+  
+  if (vendorResult.error) {
+    console.error("获取供应商列表失败:", vendorResult.error.message);
+  }
+  vendorList = vendorResult.data || [];
 
-    // 处理主查询结果
-    if (boardsResult.status === 'fulfilled') {
-      const { data, error: boardsError } = boardsResult.value;
-      if (boardsError) {
-        console.error("获取板卡数据失败:", boardsError);
-        error = boardsError;
-        boards = [];
-      } else {
-        boards = data || [];
-      }
-    } else {
-      console.error("板卡查询被拒绝:", boardsResult.reason);
-      error = boardsResult.reason;
-      boards = [];
-    }
+  // 2. 获取类别列表（使用安全查询）
+  const categoryResult = await safeQuery(
+    () => supabase.from("boards").select("category"),
+    { timeout: queryTimeout, fallback: [] }
+  );
+  
+  if (categoryResult.error) {
+    console.error("获取类别列表失败:", categoryResult.error.message);
+  } else {
+    const categoryData = categoryResult.data || [];
+    categories = [...new Set(categoryData.map((item: any) => item.category))]
+      .filter(Boolean)
+      .sort() as string[];
+  }
 
-    // 处理计数查询结果
-    if (totalCountResult.status === 'fulfilled') {
-      const { count, error: countError } = totalCountResult.value;
-      if (countError) {
-        console.error("获取总数失败:", countError);
-        totalCount = 0;
-      } else {
-        totalCount = count || 0;
-      }
-    } else {
-      console.error("计数查询被拒绝:", totalCountResult.reason);
-      totalCount = 0;
-    }
-  } catch (e) {
-    console.error("查询异常:", e);
-    error = e;
-    boards = [];
-    totalCount = 0;
+  // 3. 构建查询条件
+  const baseFilter = {
+    ...(vendorId !== undefined ? { vendor_id: vendorId } : {}),
+    ...(category ? { category } : {})
+  };
+
+  // 4. 获取板卡数据（使用安全查询）
+  const boardResult = await safeQuery(
+    () => supabase
+      .from("boards")
+      .select(`
+        id, model, category, board_website, created_at, updated_at, vendor_id,
+        vendors!inner ( id, name, website ),
+        drivers ( id, os, duplex_mode, version, driver_url )
+      `)
+      .match(baseFilter)
+      .order("created_at", { ascending: false })
+      .range((page - 1) * pageSize, page * pageSize - 1),
+    { timeout: queryTimeout, fallback: [] }
+  );
+  
+  if (boardResult.error) {
+    console.error("获取板卡数据失败:", boardResult.error.message);
+    error = boardResult.error;
+  }
+  boards = boardResult.data || [];
+
+  // 5. 获取总数（使用安全查询）
+  const countResult = await safeQuery(
+    () => supabase
+      .from('boards')
+      .select('id', { count: 'exact', head: true })
+      .match(baseFilter),
+    { timeout: queryTimeout, fallback: { count: 0 } }
+  );
+  
+  if (countResult.error) {
+    console.error("获取总数失败:", countResult.error.message);
+  } else {
+    totalCount = countResult.data?.count || 0;
   }
 } else {
   error = supInitError;
-  boards = [];
-  totalCount = 0;
 }
 ---
 
@@ -157,25 +125,35 @@ if (supabase) {
     <meta name="viewport" content="width=device-width" />
     <meta name="generator" content={Astro.generator} />
     <title>板卡列表</title>
-    <!-- 样式通过模块导入，避免生产环境下 /src 路径不可用的问题 -->
-    <!-- 已移除 <link rel="stylesheet" href="/src/styles/global.css" /> -->
   </head>
   <body class="dracula">
     { supInitError && (
       <div class="text-danger" style="padding: 12px; background: rgba(255,0,0,0.08); border: 1px solid rgba(255,0,0,0.3); margin: 12px; border-radius: 8px;">
         系统暂时不可用：{supInitError.message}。请稍后重试或联系管理员。
+        <br />
+        <small><a href="/test" style="color: #06f;">查看系统状态</a></small>
       </div>
     ) }
+    
     <div id="app">
       <header class="site-header">
         <div class="container flex">
           <h1 class="title">板卡管理</h1>
+          <div style="margin-left: auto;">
+            <a href="/test" style="color: #8be9fd; text-decoration: none; font-size: 0.9em;">系统状态</a>
+          </div>
         </div>
       </header>
 
       <main class="container">
         <section class="mb-16">
-          <FilterBar client:load vendorList={(vendorList || []) as any} categories={categories} initialVendorId={vendorId} initialCategory={category} />
+          <FilterBar 
+            client:load 
+            vendorList={vendorList} 
+            categories={categories} 
+            initialVendorId={vendorId} 
+            initialCategory={category} 
+          />
         </section>
 
         {error && <p class="text-danger">加载失败：{error.message}</p>}
@@ -216,12 +194,8 @@ if (supabase) {
                           "-"
                         )}
                       </td>
-                      <td>
-                        {b.model}
-                      </td>
-                      <td>
-                        {b.category || "-"}
-                      </td>
+                      <td>{b.model}</td>
+                      <td>{b.category || "-"}</td>
                       <td>
                         {Array.isArray(b.drivers) && b.drivers.length > 0 ? (
                           <ul class="list-drivers">
@@ -246,15 +220,18 @@ if (supabase) {
                           "-"
                         )}
                       </td>
-                      <td>
-                        {fmtDate(b.created_at)}
-                      </td>
+                      <td>{fmtDate(b.created_at)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
               <section class="mt-16">
-                <PaginationIsland client:only="react" current={page} total={totalCount || 0} pageSize={pageSize} />
+                <PaginationIsland 
+                  client:only="react" 
+                  current={page} 
+                  total={totalCount || 0} 
+                  pageSize={pageSize} 
+                />
               </section>
             </>
           )
@@ -272,7 +249,6 @@ if (supabase) {
       (function () {
         const app = document.getElementById('app');
         if (!app) return;
-        // 进入动画
         app.classList.add('enter');
         setTimeout(() => app.classList.remove('enter'), 320);
       })();

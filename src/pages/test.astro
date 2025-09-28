@@ -1,0 +1,74 @@
+---
+// 最简化的测试页面，用于验证 Serverless 部署
+export const prerender = false;
+
+const timestamp = new Date().toISOString();
+const environment = {
+  nodeEnv: process.env.NODE_ENV,
+  vercel: process.env.VERCEL,
+  vercelEnv: process.env.VERCEL_ENV
+};
+
+// 简单的环境变量检查
+const hasSupabaseUrl = !!(import.meta.env.PUBLIC_SUPABASE_URL || process.env.PUBLIC_SUPABASE_URL);
+const hasSupabaseKey = !!(import.meta.env.PUBLIC_SUPABASE_ANON_KEY || process.env.PUBLIC_SUPABASE_ANON_KEY);
+---
+
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width" />
+    <title>部署测试页面</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 2rem;
+        background: #1a1a1a;
+        color: #fff;
+      }
+      .status {
+        padding: 1rem;
+        margin: 1rem 0;
+        border-radius: 8px;
+        border: 1px solid #333;
+      }
+      .success { background: rgba(0, 255, 0, 0.1); border-color: #0f0; }
+      .error { background: rgba(255, 0, 0, 0.1); border-color: #f00; }
+      .info { background: rgba(0, 100, 255, 0.1); border-color: #06f; }
+      pre { background: #2a2a2a; padding: 1rem; border-radius: 4px; overflow-x: auto; }
+    </style>
+  </head>
+  <body>
+    <h1>🧪 Serverless 部署测试</h1>
+    
+    <div class="status success">
+      <h2>✅ 基本功能正常</h2>
+      <p>页面成功渲染，Serverless 函数运行正常</p>
+      <p><strong>时间戳:</strong> {timestamp}</p>
+    </div>
+
+    <div class="status info">
+      <h2>🌍 环境信息</h2>
+      <pre>{JSON.stringify(environment, null, 2)}</pre>
+    </div>
+
+    <div class={`status ${hasSupabaseUrl && hasSupabaseKey ? 'success' : 'error'}`}>
+      <h2>🔑 环境变量检查</h2>
+      <p><strong>Supabase URL:</strong> {hasSupabaseUrl ? '✅ 已配置' : '❌ 缺失'}</p>
+      <p><strong>Supabase Key:</strong> {hasSupabaseKey ? '✅ 已配置' : '❌ 缺失'}</p>
+    </div>
+
+    <div class="status info">
+      <h2>📝 测试说明</h2>
+      <p>如果你能看到这个页面，说明：</p>
+      <ul>
+        <li>Vercel Serverless 函数正常工作</li>
+        <li>Astro SSR 渲染正常</li>
+        <li>基本的环境变量访问正常</li>
+      </ul>
+      <p><a href="/" style="color: #06f;">返回主页</a></p>
+    </div>
+  </body>
+</html>
