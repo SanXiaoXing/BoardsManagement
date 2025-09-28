@@ -1,4 +1,5 @@
 // 简单的内存缓存，用于提升查询性能
+// 在 Serverless 环境中禁用缓存以避免潜在问题
 interface CacheItem<T> {
   data: T;
   timestamp: number;
@@ -7,8 +8,12 @@ interface CacheItem<T> {
 
 class SimpleCache {
   private cache = new Map<string, CacheItem<any>>();
+  private isServerless = typeof process !== 'undefined' && (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
 
   set<T>(key: string, data: T, ttl: number = 5 * 60 * 1000): void { // 默认5分钟
+    // 在 Serverless 环境中禁用缓存
+    if (this.isServerless) return;
+    
     this.cache.set(key, {
       data,
       timestamp: Date.now(),
@@ -17,6 +22,9 @@ class SimpleCache {
   }
 
   get<T>(key: string): T | null {
+    // 在 Serverless 环境中禁用缓存
+    if (this.isServerless) return null;
+    
     const item = this.cache.get(key);
     if (!item) return null;
 

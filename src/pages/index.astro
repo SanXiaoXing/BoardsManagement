@@ -35,9 +35,19 @@ const fmtDate = (v: any) => {
 // 获取所有公司列表（使用缓存）
 let vendorList = cache.get<any[]>('vendors');
 if (!vendorList && supabase) {
-  const { data } = await supabase.from("vendors").select("id, name").order("name");
-  vendorList = data || [];
-  cache.set('vendors', vendorList, 10 * 60 * 1000); // 缓存10分钟
+  try {
+    const { data, error } = await supabase.from("vendors").select("id, name").order("name");
+    if (error) {
+      console.error("获取供应商列表失败:", error);
+      vendorList = [];
+    } else {
+      vendorList = data || [];
+      cache.set('vendors', vendorList, 10 * 60 * 1000); // 缓存10分钟
+    }
+  } catch (e) {
+    console.error("获取供应商列表异常:", e);
+    vendorList = [];
+  }
 } else if (!vendorList) {
   vendorList = [];
 }
@@ -45,13 +55,23 @@ if (!vendorList && supabase) {
 // 获取所有类别（使用缓存）
 let categories = cache.get<string[]>('categories');
 if (!categories && supabase) {
-  const { data: categoryRows } = await supabase.from("boards").select("category");
-  categories = categoryRows
-    ? [...new Set(categoryRows.map((item) => item.category))]
-        .filter(Boolean)
-        .sort()
-    : [];
-  cache.set('categories', categories, 10 * 60 * 1000); // 缓存10分钟
+  try {
+    const { data: categoryRows, error } = await supabase.from("boards").select("category");
+    if (error) {
+      console.error("获取类别列表失败:", error);
+      categories = [];
+    } else {
+      categories = categoryRows
+        ? [...new Set(categoryRows.map((item) => item.category))]
+            .filter(Boolean)
+            .sort()
+        : [];
+      cache.set('categories', categories, 10 * 60 * 1000); // 缓存10分钟
+    }
+  } catch (e) {
+    console.error("获取类别列表异常:", e);
+    categories = [];
+  }
 } else if (!categories) {
   categories = [];
 }
@@ -62,34 +82,71 @@ const baseFilter = {
   ...(category ? { category } : {})
 };
 
-// 并行执行查询以提升性能
-const [boardsResult, totalCountResult] = await Promise.all([
-  // 获取当前页数据 - 简化查询，只获取必要字段
-  supabase
-    ? supabase
+// 执行查询，添加错误处理和超时控制
+let boards: any[] = [];
+let totalCount = 0;
+let error: any = null;
+
+if (supabase) {
+  try {
+    // 使用 Promise.allSettled 代替 Promise.all 以避免一个查询失败导致整体失败
+    const [boardsResult, totalCountResult] = await Promise.allSettled([
+      // 获取当前页数据 - 简化查询，只获取必要字段
+      supabase
         .from("boards")
         .select(
           `id, model, category, board_website, created_at, updated_at, vendor_id, vendors!inner ( id, name, website ), drivers ( id, os, duplex_mode, version, driver_url )`
         )
         .match(baseFilter)
         .order("created_at", { ascending: false })
-        .range((page - 1) * pageSize, page * pageSize - 1)
-    : { data: [] as any[], error: supInitError as any },
-  
-  // 获取总数 - 使用更高效的计数查询
-  supabase
-    ? supabase
+        .range((page - 1) * pageSize, page * pageSize - 1),
+      
+      // 获取总数 - 使用更高效的计数查询
+      supabase
         .from('boards')
         .select('id', { count: 'exact', head: true })
         .match(baseFilter)
-    : { count: 0 }
-]);
+    ]);
 
-const { data: boards, error } = boardsResult;
-const { count: totalCount } = totalCountResult;
+    // 处理主查询结果
+    if (boardsResult.status === 'fulfilled') {
+      const { data, error: boardsError } = boardsResult.value;
+      if (boardsError) {
+        console.error("获取板卡数据失败:", boardsError);
+        error = boardsError;
+        boards = [];
+      } else {
+        boards = data || [];
+      }
+    } else {
+      console.error("板卡查询被拒绝:", boardsResult.reason);
+      error = boardsResult.reason;
+      boards = [];
+    }
 
-if (error) {
-  console.error("加载 boards 失败:", error?.message || error);
+    // 处理计数查询结果
+    if (totalCountResult.status === 'fulfilled') {
+      const { count, error: countError } = totalCountResult.value;
+      if (countError) {
+        console.error("获取总数失败:", countError);
+        totalCount = 0;
+      } else {
+        totalCount = count || 0;
+      }
+    } else {
+      console.error("计数查询被拒绝:", totalCountResult.reason);
+      totalCount = 0;
+    }
+  } catch (e) {
+    console.error("查询异常:", e);
+    error = e;
+    boards = [];
+    totalCount = 0;
+  }
+} else {
+  error = supInitError;
+  boards = [];
+  totalCount = 0;
 }
 ---
 
