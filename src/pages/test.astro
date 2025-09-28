@@ -2,16 +2,48 @@
 // 最简化的测试页面，用于验证 Serverless 部署
 export const prerender = false;
 
+// 基本环境信息
 const timestamp = new Date().toISOString();
 const environment = {
-  nodeEnv: process.env.NODE_ENV,
-  vercel: process.env.VERCEL,
-  vercelEnv: process.env.VERCEL_ENV
+  NODE_ENV: process.env.NODE_ENV || 'development',
+  VERCEL: process.env.VERCEL || 'false',
+  VERCEL_ENV: process.env.VERCEL_ENV || 'local',
+  VERCEL_REGION: process.env.VERCEL_REGION || 'local',
+  isServerless: !!(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME)
 };
 
-// 简单的环境变量检查
-const hasSupabaseUrl = !!(import.meta.env.PUBLIC_SUPABASE_URL || process.env.PUBLIC_SUPABASE_URL);
-const hasSupabaseKey = !!(import.meta.env.PUBLIC_SUPABASE_ANON_KEY || process.env.PUBLIC_SUPABASE_ANON_KEY);
+// 检查环境变量
+const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL || process.env.PUBLIC_SUPABASE_URL;
+const supabaseKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || process.env.PUBLIC_SUPABASE_ANON_KEY;
+const hasSupabaseUrl = !!supabaseUrl;
+const hasSupabaseKey = !!supabaseKey;
+
+// 详细的环境变量诊断
+const envDiagnostics = {
+  supabaseUrl: {
+    present: hasSupabaseUrl,
+    source: supabaseUrl ? (import.meta.env.PUBLIC_SUPABASE_URL ? 'import.meta.env' : 'process.env') : 'none',
+    preview: supabaseUrl ? supabaseUrl.substring(0, 30) + '...' : 'missing'
+  },
+  supabaseKey: {
+    present: hasSupabaseKey,
+    source: supabaseKey ? (import.meta.env.PUBLIC_SUPABASE_ANON_KEY ? 'import.meta.env' : 'process.env') : 'none',
+    preview: supabaseKey ? supabaseKey.substring(0, 10) + '...' : 'missing'
+  },
+  allSupabaseVars: Object.keys(process.env).filter(key => key.includes('SUPABASE'))
+};
+
+// Supabase 连接测试
+let supabaseTestResult = { success: false, error: null as string | null };
+if (hasSupabaseUrl && hasSupabaseKey) {
+  try {
+    const { getSupabase } = await import('../lib/supabase');
+    const supabase = getSupabase();
+    supabaseTestResult.success = true;
+  } catch (error) {
+    supabaseTestResult.error = error instanceof Error ? error.message : String(error);
+  }
+}
 ---
 
 <html lang="zh-CN">
@@ -37,6 +69,40 @@ const hasSupabaseKey = !!(import.meta.env.PUBLIC_SUPABASE_ANON_KEY || process.en
       .success { background: rgba(0, 255, 0, 0.1); border-color: #0f0; }
       .error { background: rgba(255, 0, 0, 0.1); border-color: #f00; }
       .info { background: rgba(0, 100, 255, 0.1); border-color: #06f; }
+      
+      .error-details {
+        margin-top: 1rem;
+        padding: 1rem;
+        background-color: rgba(255, 255, 255, 0.05);
+        border-radius: 8px;
+        border-left: 4px solid #f00;
+      }
+
+      .error-details h3 {
+        margin-top: 0;
+        color: #ff6b6b;
+      }
+
+      .error-details ol {
+        margin: 0.5rem 0;
+        padding-left: 1.5rem;
+      }
+
+      .error-details li {
+        margin: 0.25rem 0;
+      }
+
+      .error-details code {
+        background-color: #2a2a2a;
+        padding: 0.125rem 0.25rem;
+        border-radius: 4px;
+        font-family: 'Courier New', monospace;
+      }
+
+      .error-details a {
+        color: #06f;
+        text-decoration: underline;
+      }
       pre { background: #2a2a2a; padding: 1rem; border-radius: 4px; overflow-x: auto; }
     </style>
   </head>
@@ -55,10 +121,53 @@ const hasSupabaseKey = !!(import.meta.env.PUBLIC_SUPABASE_ANON_KEY || process.en
     </div>
 
     <div class={`status ${hasSupabaseUrl && hasSupabaseKey ? 'success' : 'error'}`}>
-      <h2>🔑 环境变量检查</h2>
-      <p><strong>Supabase URL:</strong> {hasSupabaseUrl ? '✅ 已配置' : '❌ 缺失'}</p>
-      <p><strong>Supabase Key:</strong> {hasSupabaseKey ? '✅ 已配置' : '❌ 缺失'}</p>
+    <h2>🔑 环境变量检查</h2>
+    <p><strong>Supabase URL:</strong> {hasSupabaseUrl ? '✅ 已配置' : '❌ 缺失'}</p>
+    <p><strong>Supabase Key:</strong> {hasSupabaseKey ? '✅ 已配置' : '❌ 缺失'}</p>
+    
+    {!hasSupabaseUrl || !hasSupabaseKey ? (
+      <div class="error-details">
+        <h3>🚨 环境变量配置问题</h3>
+        {environment.VERCEL !== 'false' ? (
+          <div>
+            <p><strong>Vercel 部署环境检测到</strong></p>
+            <p>请按以下步骤配置环境变量：</p>
+            <ol>
+              <li>访问 <a href="https://vercel.com/dashboard" target="_blank">Vercel Dashboard</a></li>
+              <li>选择你的项目</li>
+              <li>进入 Settings → Environment Variables</li>
+              <li>添加 PUBLIC_SUPABASE_URL 和 PUBLIC_SUPABASE_ANON_KEY</li>
+              <li>确保选择 Production, Preview, Development 环境</li>
+              <li>重新部署项目</li>
+            </ol>
+            <p>📖 详细指南请查看项目根目录的 <code>VERCEL_ENV_SETUP.md</code></p>
+          </div>
+        ) : (
+          <div>
+            <p><strong>本地开发环境</strong></p>
+            <p>请检查项目根目录的 <code>.env</code> 文件是否包含正确的环境变量</p>
+          </div>
+        )}
+      </div>
+    ) : null}
+  </div>
+
+  <div class="status info">
+    <h2>🔍 详细诊断信息</h2>
+    <pre>{JSON.stringify(envDiagnostics, null, 2)}</pre>
+  </div>
+
+  {supabaseTestResult.success ? (
+    <div class="status success">
+      <h2>✅ Supabase 连接测试</h2>
+      <p>Supabase 客户端初始化成功！</p>
     </div>
+  ) : supabaseTestResult.error ? (
+    <div class="status error">
+      <h2>❌ Supabase 连接测试失败</h2>
+      <p><strong>错误信息:</strong> {supabaseTestResult.error}</p>
+    </div>
+  ) : null}
 
     <div class="status info">
       <h2>📝 测试说明</h2>
