@@ -12,13 +12,13 @@ import { ConfigProvider, theme, Select, Button, Space } from 'antd';
  */
 export default function FilterBar(props: {
   vendorList: Array<{ id: number; name: string }>;
-  categories: string[];
+  categories: Array<{ id: number; name: string }>;
   initialVendorId?: number;
-  initialCategory?: string;
+  initialCategory?: number;
 }): JSX.Element {
   // 本地状态：公司与类型选择
   const [vendorId, setVendorId] = useState<number | undefined>(props.initialVendorId);
-  const [category, setCategory] = useState<string | undefined>(props.initialCategory || undefined);
+  const [categoryId, setCategoryId] = useState<number | undefined>(props.initialCategory || undefined);
 
   // Ant Design 主题配置（接近 Dracula 配色）
   const cfg = useMemo(() => ({
@@ -44,7 +44,7 @@ export default function FilterBar(props: {
   const onApply = () => {
     const params = new URLSearchParams();
     if (vendorId) params.set('vendor_id', String(vendorId));
-    if (category) params.set('category', String(category));
+    if (categoryId) params.set('category', String(categoryId));
     const url = '/' + (params.toString() ? ('?' + params.toString()) : '');
 
     const overlay = document.getElementById('loading-overlay');
@@ -94,9 +94,9 @@ export default function FilterBar(props: {
             allowClear
             placeholder="全部类型"
             style={{ minWidth: 220 }}
-            options={props.categories.map(c => ({ label: c, value: c }))}
-            value={category}
-            onChange={(val) => setCategory(val)}
+            options={props.categories.map(c => ({ label: c.name, value: c.id }))}
+            value={categoryId}
+            onChange={(val) => setCategoryId(val)}
           />
         </div>
 

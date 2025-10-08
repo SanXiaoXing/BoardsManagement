@@ -29,7 +29,8 @@ const categoryParam = Astro.url.searchParams.get('category');
 const pageParam = Astro.url.searchParams.get('page');
 const vendorIdRaw = vendorIdParam ? Number(vendorIdParam) : undefined;
 const vendorId = (typeof vendorIdRaw === 'number' && Number.isFinite(vendorIdRaw)) ? vendorIdRaw : undefined;
-const category = categoryParam ? String(categoryParam) : '';
+const categoryIdRaw = categoryParam ? Number(categoryParam) : undefined;
+const categoryId = (typeof categoryIdRaw === 'number' && Number.isFinite(categoryIdRaw)) ? categoryIdRaw : undefined;
 const page = pageParam ? Math.max(1, Number(pageParam)) : 1;
 const pageSize = 10;
 
@@ -40,7 +41,7 @@ const fmtDate = (v: any) => {
 
 // 初始化数据
 let vendorList: any[] = [];
-let categories: string[] = [];
+let categories: Array<{ id: number; name: string }> = [];
 let boards: any[] = [];
 let totalCount = 0;
 let error: any = null;
@@ -57,25 +58,22 @@ if (supabase && !supInitError) {
   }
   vendorList = vendorResult.data || [];
 
-  // 2. 获取类别列表（使用安全查询）
+  // 2. 获取类别列表（使用安全查询，来自 categories 表）
   const categoryResult = await safeQuery(
-    () => supabase.from("boards").select("category"),
+    () => supabase.from("categories").select("id, name").order("name"),
     { timeout: queryTimeout, fallback: [] }
   );
   
   if (categoryResult.error) {
     console.error("获取类别列表失败:", categoryResult.error.message);
   } else {
-    const categoryData = categoryResult.data || [];
-    categories = [...new Set(categoryData.map((item: any) => item.category))]
-      .filter(Boolean)
-      .sort() as string[];
+    categories = (categoryResult.data || []) as Array<{ id: number; name: string }>;
   }
 
   // 3. 构建查询条件
   const baseFilter = {
     ...(vendorId !== undefined ? { vendor_id: vendorId } : {}),
-    ...(category ? { category } : {})
+    ...(categoryId !== undefined ? { category_id: categoryId } : {})
   };
 
   // 4. 获取板卡数据（使用安全查询）
@@ -83,8 +81,9 @@ if (supabase && !supInitError) {
     () => supabase
       .from("boards")
       .select(`
-        id, model, category, board_website, created_at, updated_at, vendor_id,
-        vendors!inner ( id, name, website ),
+        id, model, board_website, created_at, updated_at, vendor_id, category_id,
+        vendors:vendor_id ( id, name, website ),
+        categories:category_id ( id, name ),
         drivers ( id, os, duplex_mode, version, driver_url )
       `)
       .match(baseFilter)
@@ -147,7 +146,7 @@ if (supabase && !supInitError) {
             vendorList={vendorList} 
             categories={categories} 
             initialVendorId={vendorId} 
-            initialCategory={category} 
+            initialCategory={categoryId} 
           />
         </section>
 
@@ -190,7 +189,7 @@ if (supabase && !supInitError) {
                         )}
                       </td>
                       <td>{b.model}</td>
-                      <td>{b.category || "-"}</td>
+                      <td>{(b.categories && b.categories.name) ? b.categories.name : "-"}</td>
                       <td>
                         {Array.isArray(b.drivers) && b.drivers.length > 0 ? (
                           <ul class="list-drivers">
